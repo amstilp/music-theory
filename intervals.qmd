@@ -1,0 +1,104 @@
+---
+title: "Intervals and frequency"
+author: "Adrienne Stilp"
+date: "`r lubridate::today()`"
+format:
+  html:
+    fig-width: 8
+    fig-height: 4
+    code-fold: true
+---
+
+```{r setup}
+library(tidyverse)
+library(ggplot2)
+library(ggrepel)
+# https://mikldk.github.io/pichor/
+# https://github.com/mikldk/pichor
+# library(pichor) # devtools::install_github('mikldk/pichor')
+```
+## Set up relative intervals
+
+```{r}
+cmaj_notes = c("C", "C#/Db", "D", "D#/Eb", "E", "F", "F#/Gb", "G", "G#/Ab", "A", "A#/Bb", "B", "C^")
+cmaj_scale = ordered(cmaj_notes, levels=cmaj_notes)
+# Notes in a 12-step chromatic scale.
+notes = tibble(
+    index = 0:12,
+    note = cmaj_scale,
+    relative_frequency = 2^(index/12),
+    # See https://pages.mtu.edu/~suits/RationalApprox.html
+    just_scale_ratio = c(1, 25/24, 9/8, 6/5, 5/4, 4/3, 45/32, 3/2, 8/5, 5/3, 9/5, 15/8, 2/1)
+)
+print(notes)
+```
+
+## Compare just scale to equal temperament
+
+```{r}
+ggplot(notes, aes(x=just_scale_ratio, y = relative_frequency, label=note)) +
+    geom_abline(color="grey70", linetype="dashed") +
+    geom_point() +
+    geom_text_repel()
+
+ggplot(notes, aes(x=index, y = just_scale_ratio - relative_frequency, label=note)) +
+    geom_hline(yintercept=0, color="grey70", linetype="dashed") +
+    geom_point() +
+    geom_text_repel()
+```
+
+## Set up frequencies data frames
+```{r}
+tmp = tibble(
+    time_index = 0:1000,
+    t = time_index/50,
+)
+frequencies = notes %>%
+    cross_join(tmp) %>%
+    mutate(amplitude = sin(2 * pi * t * relative_frequency))
+```
+
+## Frequency plots
+
+```{r}
+ggplot(frequencies, aes(x=t, y=amplitude, color=note)) +
+    geom_line() +
+    facet_wrap(~note, ncol=3)
+```
+
+## Harmonics and wave interference
+```{r}
+c0_frequency = frequencies %>% filter(note == "C") %>% select(time_index, amplitude)
+for (note in notes$note) {
+# for (note in c("D", "E")) {
+    # Create a data frame where we can calculate interference.
+    dat = frequencies %>%
+        filter(note == !!note) %>%
+        left_join(c0_frequency, by="time_index", suffix=c("_c0", "_note")) %>%
+        mutate(
+            amplitude_interference = (amplitude_c0 + amplitude_note),
+            f_beat = abs(relative_frequency - 1),
+            envelope_amplitude = 2 * cos(2 * pi  * (t) * (relative_frequency - 1) / 2)
+        ) %>%
+        pivot_longer(
+            all_of(c("amplitude_c0", "amplitude_note", "amplitude_interference", "envelope_amplitude")),
+            names_to="type",
+            values_to="amplitude"
+        ) %>%
+        mutate(type = ordered(type, levels=c("amplitude_c0", "amplitude_note", "amplitude_interference", "envelope_amplitude"))) %>%
+        mutate(top_panel = type %in% c("amplitude_interference", "envelope_amplitude"))
+    cmap = c(
+        "amplitude_c0"="red",
+        "amplitude_note"="blue",
+        "amplitude_interference"="purple",
+        "envelope_amplitude"="black"
+    )
+    p <- ggplot(dat, aes(x = t, y = amplitude, color=type)) +
+        geom_line() +
+        facet_wrap(~top_panel, ncol=1) +
+        ggtitle(glue::glue("Notes: C and {note}")) +
+        # scale_color_brewer(palette="Dark2")
+        scale_color_manual(values=cmap, breaks=names(cmap))
+    print(p)
+}
+```
